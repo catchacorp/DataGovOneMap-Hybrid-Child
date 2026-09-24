@@ -151,6 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     if (apiKey && apiKey.trim() !== '') {
+      headers['x-api-key'] = apiKey;
       headers['api-key'] = apiKey;
     }
 

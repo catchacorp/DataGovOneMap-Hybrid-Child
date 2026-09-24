@@ -54,6 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const testUrl = `https://data.gov.sg/api/action/datastore_search?resource_id=${datasetId}&limit=1`;
     const headers: Record<string, string> = { 'Accept': 'application/json' };
     if (datagovKeyConfigured) {
+      headers['x-api-key'] = process.env.DATA_GOV_SG_API_KEY!;
       headers['api-key'] = process.env.DATA_GOV_SG_API_KEY!;
     }
 

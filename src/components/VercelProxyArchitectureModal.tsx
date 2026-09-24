@@ -186,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiUrl = \`https://data.gov.sg/api/action/datastore_search?resource_id=\${datasetId}&limit=100\`;
 
     const response = await fetch(apiUrl, {
-      headers: apiKey ? { 'api-key': apiKey } : {}
+      headers: apiKey ? { 'x-api-key': apiKey, 'api-key': apiKey } : {}
     });
 
     const data = await response.json();
