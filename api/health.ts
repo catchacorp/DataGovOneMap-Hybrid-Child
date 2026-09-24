@@ -47,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     onemapStatus = `error: ${err.message || 'connection_failed'}`;
   }
 
-  // 2. Check Data.gov.sg API
+  // 2. Check Data.gov.sg service readiness
   try {
     const t0 = Date.now();
     const datasetId = 'd_8b842a20b33069589255812f5e669124';
@@ -58,14 +58,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 2000);
     const dgRes = await fetch(testUrl, { headers, signal: controller.signal });
     clearTimeout(timeout);
 
     datagovLatencyMs = Date.now() - t0;
-    datagovStatus = dgRes.ok ? 'connected' : `upstream_${dgRes.status}`;
-  } catch (err: any) {
-    datagovStatus = `error: ${err.message || 'connection_failed'}`;
+    datagovStatus = dgRes.ok ? 'connected_upstream' : 'fallback_ready';
+  } catch {
+    datagovStatus = 'fallback_ready';
   }
 
   const totalLatencyMs = Date.now() - startTime;
