@@ -35,6 +35,8 @@ export const MapComponent: React.FC<MapComponentProps> = ({
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layersGroupRef = useRef<L.LayerGroup | null>(null);
   const polygonLayerRef = useRef<L.Polygon | null>(null);
+  const baseTileLayerRef = useRef<L.TileLayer | null>(null);
+  const [mapStyle, setMapStyle] = React.useState<'Default' | 'Grey' | 'Night' | 'Original' | 'Voyager'>('Default');
 
   // Initialize Map
   useEffect(() => {
@@ -53,12 +55,15 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     // Add zoom control in bottom-right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // CartoDB Positron / OSM clean tile layer for Singapore
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    // Initial official OneMap Default basemap as documented in https://www.onemap.gov.sg/docs/maps/
+    const tileLayer = L.tileLayer('https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      minZoom: 11,
       attribution:
-        '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | OneMap SLA & Data.gov.sg Data',
+        '&copy; <a href="https://www.onemap.gov.sg/" target="_blank">OneMap</a> &copy; Singapore Land Authority | Data.gov.sg',
     }).addTo(map);
+
+    baseTileLayerRef.current = tileLayer;
 
     const layersGroup = L.layerGroup().addTo(map);
     layersGroupRef.current = layersGroup;
@@ -69,6 +74,41 @@ export const MapComponent: React.FC<MapComponentProps> = ({
       mapInstanceRef.current = null;
     };
   }, []);
+
+  // Update base tile layer when mapStyle changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    if (baseTileLayerRef.current) {
+      map.removeLayer(baseTileLayerRef.current);
+    }
+
+    let url = 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png';
+    let attribution =
+      '&copy; <a href="https://www.onemap.gov.sg/" target="_blank">OneMap</a> &copy; Singapore Land Authority | Data.gov.sg';
+
+    if (mapStyle === 'Grey') {
+      url = 'https://www.onemap.gov.sg/maps/tiles/Grey/{z}/{x}/{y}.png';
+    } else if (mapStyle === 'Night') {
+      url = 'https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png';
+    } else if (mapStyle === 'Original') {
+      url = 'https://www.onemap.gov.sg/maps/tiles/Original/{z}/{x}/{y}.png';
+    } else if (mapStyle === 'Voyager') {
+      url = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+      attribution = '&copy; CARTO &copy; OpenStreetMap contributors | SLA OneMap';
+    }
+
+    const newLayer = L.tileLayer(url, {
+      maxZoom: 19,
+      minZoom: 11,
+      attribution,
+    }).addTo(map);
+
+    // Ensure base tiles stay below markers
+    newLayer.bringToBack();
+    baseTileLayerRef.current = newLayer;
+  }, [mapStyle]);
 
   // Handle map click when drawing budget boundary
   useEffect(() => {
@@ -360,6 +400,24 @@ export const MapComponent: React.FC<MapComponentProps> = ({
     <div className="relative w-full h-full">
       {/* Map DOM Element */}
       <div ref={mapContainerRef} className="w-full h-full z-10" />
+
+      {/* OneMap Basemap Style Switcher (Bottom Left) */}
+      <div className="absolute bottom-20 sm:bottom-6 left-4 z-20 pointer-events-auto bg-white/95 backdrop-blur-md px-2 py-1.5 rounded-xl shadow-lg border border-slate-200/90 flex items-center space-x-1 text-[11px] font-semibold text-slate-700">
+        <span className="text-slate-400 text-[10px] uppercase font-bold tracking-wider px-1">OneMap Basemap:</span>
+        {(['Default', 'Grey', 'Night', 'Original'] as const).map((style) => (
+          <button
+            key={style}
+            onClick={() => setMapStyle(style)}
+            className={`px-2 py-0.5 rounded-lg transition ${
+              mapStyle === style
+                ? 'bg-indigo-600 text-white shadow-2xs font-bold'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            {style}
+          </button>
+        ))}
+      </div>
 
       {/* Map Drawing Active Floating Notice */}
       {isDrawingMode && (
