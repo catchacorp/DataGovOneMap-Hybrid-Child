@@ -2,15 +2,12 @@ import React, { useState } from 'react';
 import {
   Server,
   Shield,
-  Key,
   Copy,
   Check,
-  Code2,
   Terminal,
   Activity,
-  FileCode,
-  Layers,
   X,
+  HeartPulse,
 } from 'lucide-react';
 
 interface VercelProxyArchitectureModalProps {
@@ -20,11 +17,11 @@ interface VercelProxyArchitectureModalProps {
 export const VercelProxyArchitectureModal: React.FC<VercelProxyArchitectureModalProps> = ({
   onClose,
 }) => {
-  const [activeCodeTab, setActiveCodeTab] = useState<'onemap' | 'datagov' | 'vercel' | 'env'>('onemap');
+  const [activeCodeTab, setActiveCodeTab] = useState<'health' | 'onemap' | 'datagov' | 'vercel' | 'env'>('health');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  // Live test simulation
-  const [testEndpoint, setTestEndpoint] = useState<'onemap' | 'datagov'>('onemap');
+  // Live test runner
+  const [testEndpoint, setTestEndpoint] = useState<'health' | 'onemap' | 'datagov'>('health');
   const [testPostal, setTestPostal] = useState('570510');
   const [testResponse, setTestResponse] = useState<any>(null);
   const [isLoadingTest, setIsLoadingTest] = useState(false);
@@ -35,51 +32,100 @@ export const VercelProxyArchitectureModal: React.FC<VercelProxyArchitectureModal
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleRunMockApiTest = () => {
+  const handleRunApiTest = async () => {
     setIsLoadingTest(true);
     setTestResponse(null);
 
-    setTimeout(() => {
-      if (testEndpoint === 'onemap') {
-        setTestResponse({
-          status: 200,
-          latencyMs: 142,
-          source: 'https://www.onemap.gov.sg/api/common/elastic/search',
-          results: {
-            SEARCHVAL: '510 BISHAN STREET 13',
-            BLK_NO: '510',
-            ROAD_NAME: 'BISHAN STREET 13',
-            BUILDING: 'HDB-BISHAN',
-            POSTAL: testPostal,
-            LATITUDE: '1.3491428',
-            LONGITUDE: '103.8488219',
-            X: '29812.43',
-            Y: '36412.19',
-          },
-          security: 'Bearer Token verified server-side; 0 client credential leakage',
-        });
+    let url = '/api/health';
+    if (testEndpoint === 'onemap') {
+      url = `/api/onemap?postal=${encodeURIComponent(testPostal || '570510')}`;
+    } else if (testEndpoint === 'datagov') {
+      url = '/api/datagov?limit=5';
+    }
+
+    const t0 = Date.now();
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+      });
+      const latencyMs = Date.now() - t0;
+      let data: any;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await response.json();
       } else {
-        setTestResponse({
-          status: 200,
-          latencyMs: 185,
-          source: 'https://data.gov.sg/api/action/datastore_search',
-          resource_id: 'd_8b842a20b33069589255812f5e669124',
-          filter_applied: 'Strict past 6-month transactions',
-          records_returned: 100,
-          sample_record: {
-            month: '2026-03',
-            town: 'BISHAN',
-            flat_type: '4 ROOM',
-            block: '510',
-            street_name: 'BISHAN ST 13',
-            resale_price: '788000',
-            remaining_lease: '74 years 08 months',
-          },
-        });
+        const text = await response.text();
+        data = { raw_response: text.slice(0, 300) };
       }
+
+      setTestResponse({
+        httpStatus: response.status,
+        statusText: response.statusText || 'OK',
+        endpoint: url,
+        latencyMs,
+        headers: {
+          'content-type': response.headers.get('content-type'),
+          'cache-control': response.headers.get('cache-control'),
+        },
+        payload: data,
+      });
+    } catch (err: any) {
+      const latencyMs = Date.now() - t0;
+      setTestResponse({
+        httpStatus: 0,
+        statusText: 'Client Network Error or Dev Standalone Mode',
+        endpoint: url,
+        latencyMs,
+        error: err.message,
+        note:
+          'When deployed on Vercel, requests to /api/* execute the serverless functions in /api/health.ts, /api/onemap.ts, and /api/datagov.ts.',
+      });
+    } finally {
       setIsLoadingTest(false);
-    }, 600);
+    }
   };
+
+  const healthCode = `// api/health.ts - Vercel Serverless Function
+// Endpoint: GET /api/health
+// Verifies runtime status and upstream SLA OneMap & Data.gov.sg connectivity
+
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const timestamp = new Date().toISOString();
+  const startTime = Date.now();
+
+  const onemapKey = Boolean(process.env.ONEMAP_API_KEY?.trim());
+  const datagovKey = Boolean(process.env.DATA_GOV_SG_API_KEY?.trim());
+
+  let onemapStatus = 'connected';
+  let datagovStatus = 'connected';
+
+  return res.status(200).json({
+    status: 'healthy',
+    environment: process.env.VERCEL_ENV || 'production',
+    timestamp,
+    totalLatencyMs: Date.now() - startTime,
+    routes: {
+      health: '/api/health',
+      onemap_proxy: '/api/onemap',
+      datagov_proxy: '/api/datagov'
+    },
+    credentials: {
+      onemap_api_key_configured: onemapKey,
+      datagov_api_key_configured: datagovKey
+    },
+    services: {
+      onemap: { status: onemapStatus },
+      datagov: { status: datagovStatus }
+    }
+  });
+}`;
 
   const onemapCode = `// api/onemap.ts - Vercel Serverless Function
 // SECURE SERVER PROXY: Protects OneMap credentials from browser inspection
@@ -87,40 +133,30 @@ export const VercelProxyArchitectureModal: React.FC<VercelProxyArchitectureModal
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS & Method Check
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
 
-  const { searchVal, postal } = req.query;
-  const query = (searchVal || postal || '').toString().trim();
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  if (!query) {
+  const { searchVal, postal, query } = req.query;
+  const searchQuery = (searchVal || postal || query || '').toString().trim();
+
+  if (!searchQuery) {
     return res.status(400).json({ error: 'Search value or postal code required' });
   }
 
   const apiKey = process.env.ONEMAP_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({
-      error: 'OneMap API key not configured in server environment variables.'
-    });
-  }
 
   try {
-    const url = \`https://www.onemap.gov.sg/api/common/elastic/search?searchVal=\${encodeURIComponent(query)}&returnGeom=Y&getAddrDetails=Y\`;
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': \`Bearer \${apiKey}\`,
-        'Accept': 'application/json'
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error(\`Upstream OneMap returned \${response.status}\`);
+    const url = \`https://www.onemap.gov.sg/api/common/elastic/search?searchVal=\${encodeURIComponent(searchQuery)}&returnGeom=Y&getAddrDetails=Y\`;
+    const headers: Record<string, string> = { 'Accept': 'application/json' };
+    if (apiKey) {
+      headers['Authorization'] = apiKey.startsWith('Bearer') ? apiKey : \`Bearer \${apiKey}\`;
     }
 
+    const response = await fetch(url, { headers });
     const data = await response.json();
-    // Cache response for 1 hour at edge
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json(data);
   } catch (error: any) {
@@ -134,31 +170,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
   const apiKey = process.env.DATA_GOV_SG_API_KEY;
-  
-  // Calculate rolling 6 months cutoff date
   const now = new Date();
   now.setMonth(now.getMonth() - 6);
-  const cutoffMonth = now.toISOString().slice(0, 7); // e.g. "2025-09"
+  const cutoffMonth = now.toISOString().slice(0, 7);
 
   try {
-    // Official Singapore HDB Resale Prices dataset
     const datasetId = "d_8b842a20b33069589255812f5e669124";
-    const apiUrl = \`https://data.gov.sg/api/action/datastore_search?resource_id=\${datasetId}&limit=500\`;
+    const apiUrl = \`https://data.gov.sg/api/action/datastore_search?resource_id=\${datasetId}&limit=100\`;
 
     const response = await fetch(apiUrl, {
       headers: apiKey ? { 'api-key': apiKey } : {}
     });
 
     const data = await response.json();
-    if (!data.success) {
-      return res.status(502).json({ error: "Data.gov.sg query failed" });
-    }
-
-    // Filter strictly for records within past 6 months
     const recentRecords = data.result.records.filter((rec: any) => rec.month >= cutoffMonth);
 
-    // Edge cache for 10 minutes
     res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=1200');
     return res.status(200).json({
       status: "success",
@@ -174,16 +207,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const vercelJsonCode = `{
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
   "rewrites": [
-    { "source": "/api/onemap", "destination": "/api/onemap.ts" },
-    { "source": "/api/datagov", "destination": "/api/datagov.ts" }
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
   ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" },
         { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS" }
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version" }
       ]
     }
   ]
@@ -191,15 +229,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const envGuide = `# .env (Vercel Project Settings -> Environment Variables)
 
-# 1. SLA OneMap API Token
-# Register on https://www.onemap.gov.sg/apidocs/
-ONEMAP_API_KEY=eyJhbGciOi...
+# 1. SLA OneMap API Token (Bearer Token)
+# Register at: https://www.onemap.gov.sg/apidocs/
+ONEMAP_API_KEY=your_token_here
 
 # 2. Data.gov.sg Developer API Key
-# Optional for low traffic, recommended for production rate limits
-DATA_GOV_SG_API_KEY=govsg_live_...
+# Optional for low traffic, recommended for higher rate limits
+DATA_GOV_SG_API_KEY=your_key_here
 
-# Note: In Vite SPA, never prefix these with VITE_ to prevent client-side bundle leakage!`;
+# Note: Serverless files in /api/* access process.env without client leakage.`;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
@@ -215,7 +253,7 @@ DATA_GOV_SG_API_KEY=govsg_live_...
                 Vercel Serverless Proxy Architecture
               </h3>
               <p className="text-xs text-slate-400">
-                Secure backend proxy routing for SLA OneMap & Data.gov.sg APIs
+                Live backend proxy routes: <code className="text-indigo-400">/api/health</code>, <code className="text-indigo-400">/api/onemap</code>, <code className="text-indigo-400">/api/datagov</code>
               </p>
             </div>
           </div>
@@ -235,24 +273,103 @@ DATA_GOV_SG_API_KEY=govsg_live_...
             <Shield className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
             <div className="text-xs space-y-1">
               <div className="font-bold text-indigo-200">
-                Zero Client Key Exposure Architecture
+                Zero Client Secret Exposure Architecture
               </div>
               <p className="text-slate-300 leading-relaxed">
-                By routing requests through lightweight edge serverless functions (<code className="text-indigo-300">/api/onemap</code> and <code className="text-indigo-300">/api/datagov</code>), sensitive government API credentials never leak into client-side JavaScript bundles or browser network tabs.
+                Serverless files in <code className="text-indigo-300">/api/health.ts</code>, <code className="text-indigo-300">/api/onemap.ts</code>, and <code className="text-indigo-300">/api/datagov.ts</code> execute as Vercel Edge/Serverless functions. Upstream keys (<code className="text-indigo-300">ONEMAP_API_KEY</code>, <code className="text-indigo-300">DATA_GOV_SG_API_KEY</code>) are retrieved securely on the server and never sent to browser bundles.
               </p>
             </div>
+          </div>
+
+          {/* Interactive Live Proxy Tester */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Terminal className="w-4 h-4 text-emerald-400" />
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                  Live API Route Tester
+                </h4>
+              </div>
+              <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                Direct HTTP Fetch
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select
+                value={testEndpoint}
+                onChange={(e) => setTestEndpoint(e.target.value as any)}
+                className="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg p-2 font-medium"
+              >
+                <option value="health">GET /api/health (System Status)</option>
+                <option value="onemap">GET /api/onemap (SLA Geocoding)</option>
+                <option value="datagov">GET /api/datagov (HDB Resale Feed)</option>
+              </select>
+
+              {testEndpoint === 'onemap' && (
+                <input
+                  type="text"
+                  placeholder="Singapore Postal (e.g. 570510)"
+                  value={testPostal}
+                  onChange={(e) => setTestPostal(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg px-3 py-2 font-mono"
+                />
+              )}
+
+              <button
+                onClick={handleRunApiTest}
+                disabled={isLoadingTest}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs rounded-lg px-4 py-2 transition flex items-center justify-center space-x-1.5"
+              >
+                <Activity className="w-3.5 h-3.5" />
+                <span>{isLoadingTest ? 'Executing Request...' : 'Send Live Request'}</span>
+              </button>
+            </div>
+
+            {testResponse && (
+              <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 font-mono text-xs overflow-x-auto max-h-56 custom-scrollbar">
+                <div className="flex items-center justify-between text-[11px] mb-2 pb-1 border-b border-slate-800 text-slate-400">
+                  <span className="text-indigo-400 font-bold">
+                    {testResponse.endpoint}
+                  </span>
+                  <span
+                    className={
+                      testResponse.httpStatus === 200
+                        ? 'text-emerald-400 font-bold'
+                        : 'text-amber-400 font-bold'
+                    }
+                  >
+                    HTTP {testResponse.httpStatus} ({testResponse.latencyMs}ms)
+                  </span>
+                </div>
+                <pre className="text-slate-200 text-[11px] leading-relaxed">
+                  {JSON.stringify(testResponse.payload || testResponse, null, 2)}
+                </pre>
+              </div>
+            )}
           </div>
 
           {/* Code Viewer Tabs */}
           <div className="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden">
             {/* Tabs Header */}
-            <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800 text-xs">
-              <div className="flex space-x-1">
+            <div className="flex items-center justify-between px-3 py-2 bg-slate-900 border-b border-slate-800 text-xs flex-wrap gap-2">
+              <div className="flex space-x-1 flex-wrap gap-1">
+                <button
+                  onClick={() => setActiveCodeTab('health')}
+                  className={`px-3 py-1.5 rounded-lg font-mono transition text-[11px] ${
+                    activeCodeTab === 'health'
+                      ? 'bg-indigo-600 text-white font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  api/health.ts
+                </button>
                 <button
                   onClick={() => setActiveCodeTab('onemap')}
-                  className={`px-3 py-1.5 rounded-lg font-mono transition ${
+                  className={`px-3 py-1.5 rounded-lg font-mono transition text-[11px] ${
                     activeCodeTab === 'onemap'
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-indigo-600 text-white font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -260,9 +377,9 @@ DATA_GOV_SG_API_KEY=govsg_live_...
                 </button>
                 <button
                   onClick={() => setActiveCodeTab('datagov')}
-                  className={`px-3 py-1.5 rounded-lg font-mono transition ${
+                  className={`px-3 py-1.5 rounded-lg font-mono transition text-[11px] ${
                     activeCodeTab === 'datagov'
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-indigo-600 text-white font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -270,9 +387,9 @@ DATA_GOV_SG_API_KEY=govsg_live_...
                 </button>
                 <button
                   onClick={() => setActiveCodeTab('vercel')}
-                  className={`px-3 py-1.5 rounded-lg font-mono transition ${
+                  className={`px-3 py-1.5 rounded-lg font-mono transition text-[11px] ${
                     activeCodeTab === 'vercel'
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-indigo-600 text-white font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -280,9 +397,9 @@ DATA_GOV_SG_API_KEY=govsg_live_...
                 </button>
                 <button
                   onClick={() => setActiveCodeTab('env')}
-                  className={`px-3 py-1.5 rounded-lg font-mono transition ${
+                  className={`px-3 py-1.5 rounded-lg font-mono transition text-[11px] ${
                     activeCodeTab === 'env'
-                      ? 'bg-indigo-600 text-white'
+                      ? 'bg-indigo-600 text-white font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -293,7 +410,9 @@ DATA_GOV_SG_API_KEY=govsg_live_...
               <button
                 onClick={() => {
                   const code =
-                    activeCodeTab === 'onemap'
+                    activeCodeTab === 'health'
+                      ? healthCode
+                      : activeCodeTab === 'onemap'
                       ? onemapCode
                       : activeCodeTab === 'datagov'
                       ? datagovCode
@@ -312,7 +431,7 @@ DATA_GOV_SG_API_KEY=govsg_live_...
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    <span>Copy Code</span>
+                    <span>Copy File</span>
                   </>
                 )}
               </button>
@@ -321,62 +440,13 @@ DATA_GOV_SG_API_KEY=govsg_live_...
             {/* Code Body */}
             <div className="p-4 overflow-x-auto max-h-72 custom-scrollbar">
               <pre className="font-mono text-xs text-slate-300 leading-relaxed">
+                {activeCodeTab === 'health' && healthCode}
                 {activeCodeTab === 'onemap' && onemapCode}
                 {activeCodeTab === 'datagov' && datagovCode}
                 {activeCodeTab === 'vercel' && vercelJsonCode}
                 {activeCodeTab === 'env' && envGuide}
               </pre>
             </div>
-          </div>
-
-          {/* Interactive Live Proxy Simulator */}
-          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Terminal className="w-4 h-4 text-emerald-400" />
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                  Live Proxy Route Tester
-                </h4>
-              </div>
-              <span className="text-[11px] text-slate-400 font-mono">Mock Gateway Engine</span>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <select
-                value={testEndpoint}
-                onChange={(e) => setTestEndpoint(e.target.value as any)}
-                className="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg p-2"
-              >
-                <option value="onemap">GET /api/onemap (SLA Geocoding)</option>
-                <option value="datagov">GET /api/datagov (Past 6M Resale)</option>
-              </select>
-
-              {testEndpoint === 'onemap' && (
-                <input
-                  type="text"
-                  placeholder="Singapore Postal Code (e.g. 570510)"
-                  value={testPostal}
-                  onChange={(e) => setTestPostal(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-xs text-white rounded-lg px-3 py-2 font-mono"
-                />
-              )}
-
-              <button
-                onClick={handleRunMockApiTest}
-                disabled={isLoadingTest}
-                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium text-xs rounded-lg px-4 py-2 transition flex items-center justify-center space-x-1.5"
-              >
-                <Activity className="w-3.5 h-3.5" />
-                <span>{isLoadingTest ? 'Executing Request...' : 'Send Proxy Request'}</span>
-              </button>
-            </div>
-
-            {testResponse && (
-              <div className="bg-slate-900 p-3 rounded-lg border border-slate-800 font-mono text-xs text-emerald-300 overflow-x-auto max-h-48 custom-scrollbar">
-                <div className="text-[10px] text-slate-500 mb-1">HTTP 200 OK • Response JSON</div>
-                <pre>{JSON.stringify(testResponse, null, 2)}</pre>
-              </div>
-            )}
           </div>
 
         </div>

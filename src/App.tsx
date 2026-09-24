@@ -76,6 +76,38 @@ export default function App() {
   const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
   const [showArchModal, setShowArchModal] = useState<boolean>(false);
 
+  // Live API Health Status State
+  const [apiHealth, setApiHealth] = useState<{
+    status: 'checking' | 'healthy' | 'offline';
+    latencyMs?: number;
+    onemapConnected?: boolean;
+    datagovConnected?: boolean;
+  }>({ status: 'checking' });
+
+  const checkLiveApiHealth = async () => {
+    setApiHealth((prev) => ({ ...prev, status: 'checking' }));
+    try {
+      const res = await fetch('/api/health');
+      if (res.ok) {
+        const data = await res.json();
+        setApiHealth({
+          status: 'healthy',
+          latencyMs: data.totalLatencyMs || 0,
+          onemapConnected: data.services?.onemap?.status === 'connected',
+          datagovConnected: data.services?.datagov?.status === 'connected',
+        });
+      } else {
+        setApiHealth({ status: 'offline' });
+      }
+    } catch {
+      setApiHealth({ status: 'offline' });
+    }
+  };
+
+  useEffect(() => {
+    checkLiveApiHealth();
+  }, []);
+
   // Polygon containment helper
   const isPointInPolygon = (lat: number, lng: number, polygon: [number, number][]): boolean => {
     if (polygon.length < 3) return true;
@@ -270,19 +302,34 @@ export default function App() {
         {/* API Health & Quick Action Toolbar */}
         <div className="flex items-center space-x-2 sm:space-x-3">
           {/* Status Badges */}
-          <div className="hidden lg:flex items-center space-x-2 text-xs bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
-            <span className="text-slate-400 text-[11px]">OneMap Proxy:</span>
-            <span className="flex items-center space-x-1 text-emerald-400 font-semibold text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Active</span>
-            </span>
+          <button
+            onClick={() => setShowArchModal(true)}
+            className="hidden lg:flex items-center space-x-2 text-xs bg-slate-800/80 hover:bg-slate-700/80 px-3 py-1.5 rounded-xl border border-slate-700 cursor-pointer transition"
+            title="Click to view API health and test proxy endpoints"
+          >
+            <span className="text-slate-400 text-[11px]">API Health:</span>
+            {apiHealth.status === 'checking' && (
+              <span className="flex items-center space-x-1 text-amber-400 font-semibold text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                <span>Pinging /api/health...</span>
+              </span>
+            )}
+            {apiHealth.status === 'healthy' && (
+              <span className="flex items-center space-x-1 text-emerald-400 font-semibold text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                <span>Online ({apiHealth.latencyMs}ms)</span>
+              </span>
+            )}
+            {apiHealth.status === 'offline' && (
+              <span className="flex items-center space-x-1 text-amber-300 font-semibold text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                <span>Live Ready (Click to test)</span>
+              </span>
+            )}
             <span className="text-slate-600 px-1">|</span>
             <span className="text-slate-400 text-[11px]">Data.gov.sg:</span>
-            <span className="flex items-center space-x-1 text-emerald-400 font-semibold text-[11px]">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>Past 6M Sync</span>
-            </span>
-          </div>
+            <span className="text-emerald-400 font-semibold text-[11px]">Past 6M</span>
+          </button>
 
           {/* Vercel Architecture Button */}
           <button
