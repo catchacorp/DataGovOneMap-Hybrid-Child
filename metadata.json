@@ -1,0 +1,6 @@
+{
+  "name": "SG HDB Resale & Amenities Hub",
+  "description": "Explore Singapore HDB resale transactions with 5km proximity analysis, MOE primary school priority zones, amenities mapping, and custom budget boundary filtering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
